@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time WebSocket Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .message-container {
+            scrollbar-width: thin;
+            scrollbar-color: #4B5563 #1F2937;
+        }
+        .message-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .message-container::-webkit-scrollbar-track {
+            background: #1F2937;
+        }
+        .message-container::-webkit-scrollbar-thumb {
+            background-color: #4B5563;
+            border-radius: 4px;
+        }
+        .typing-indicator:after {
+            content: '...';
+            animation: typing 1.5s infinite;
+            display: inline-block;
+            width: 0;
+        }
+        @keyframes typing {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 h-screen flex">
+    <!-- Authentication Section -->
+    <div id="auth-section" class="w-full max-w-md mx-auto p-8 self-center">
+        <div class="bg-gray-800 rounded-lg shadow-lg p-6">
+            <h1 class="text-2xl font-bold text-center mb-6">Chat App</h1>
+            <div id="login-form" class="space-y-4">
+                <div>
+                    <label for="username" class="block text-sm font-medium mb-1">Username</label>
+                    <input type="text" id="username" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium mb-1">Password</label>
+                    <input type="password" id="password" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex justify-between">
+                    <button id="login-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition">Login</button>
+                    <button id="register-btn" class="text-blue-400 hover:text-blue-300 px-4 py-2 rounded-md font-medium transition">Create Account</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chat Interface (Hidden Initially) -->
+    <div id="chat-interface" class="hidden w-full flex flex-col h-screen">
+        <!-- Header -->
+        <header class="bg-gray-800 p-4 flex justify-between items-center border-b border-gray-700">
+            <div class="flex items-center space-x-3">
+                <button id="menu-btn" class="text-gray-400 hover:text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+                <h1 class="font-bold">WebSocket Chat</h1>
+            </div>
+            <div class="flex items-center space-x-3">
+                <div id="connection-status" class="flex items-center space-x-1 text-xs">
+                    <span class="w-3 h-3 rounded-full bg-gray-400"></span>
+                    <span>Connecting...</span>
+                </div>
+                <button id="logout-btn" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-md text-sm">Logout</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar -->
+            <div id="sidebar" class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+                <div class="p-3 border-b border-gray-700">
+                    <div class="flex items-center space-x-3">
+                        <img src="https://placehold.co/36x36" alt="User profile avatar with circular background" id="user-avatar" class="w-9 h-9 rounded-full bg-gray-600">
+                        <div>
+                            <div id="user-name" class="font-medium">Username</div>
+                            <div id="user-status" class="text-xs text-gray-400">Online</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto">
+                    <div class="p-2 space-y-1">
+                        <div class="px-3 py-2 font-medium text-sm text-gray-400">Rooms</div>
+                        <div id="rooms-list" class="space-y-1">
+                            <!-- Rooms will be populated here -->
+                        </div>
+                        
+                        <div class="flex justify-between items-center px-3 py-2">
+                            <span class="font-medium text-sm text-gray-400">Direct Messages</span>
+                            <button id="new-dm-btn" class="text-gray-400 hover:text-white">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="dm-list" class="space-y-1">
+                            <!-- Direct messages will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="flex-1 flex flex-col">
+                <!-- Chat Header -->
+                <div id="chat-header" class="bg-gray-800 p-3 border-b border-gray-700 flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <div id="chat-avatar" class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-lg font-bold">
+                            #
+                        </div>
+                        <div>
+                            <div id="chat-title" class="font-medium">Select a chat</div>
+                            <div id="typing-indicator" class="text-xs text-gray-400 hidden">
+                                <span class="typing-indicator"></span>
+                            </div>
+                            <div id="presence-info" class="text-xs text-gray-400"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="chat-info-btn" class="p-1 rounded-md hover:bg-gray-700" title="Chat info">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Messages -->
+                <div id="messages" class="flex-1 overflow-y-auto message-container bg-gray-900 p-4 space-y-3">
+                    <div class="text-center text-gray-500 py-4">Select a chat to start messaging</div>
+                </div>
+
+                <!-- Message Input -->
+                <div class="p-3 border-t border-gray-700 bg-gray-800">
+                    <div id="upload-preview" class="hidden bg-gray-700 p-2 rounded-md mb-2 flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <div class="w-12 h-12 rounded-md bg-gray-600 flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="text-sm font-medium">image.png</div>
+                                <div class="text-xs text-gray-400">1024 KB</div>
+                            </div>
+                        </div>
+                        <button id="cancel-upload" class="text-gray-400 hover:text-white">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="attach-btn" class="p-2 rounded-md hover:bg-gray-700" title="Attach file">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                        </button>
+                        <input type="file" id="file-input" class="hidden" accept="image/*,video/*,.pdf,.doc,.docx">
+                        <div class="flex-1 relative">
+                            <textarea id="message-input" rows="1" placeholder="Type a message..." class="w-full bg-gray-700 rounded-md px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none max-h-32"></textarea>
+                            <button id="send-btn" class="absolute right-2 bottom-2 text-gray-400 hover:text-blue-400">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Backdrop -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden"></div>
+
+    <!-- Create Room Modal -->
+    <div id="create-room-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Create New Room</h2>
+                <button id="close-room-modal" class="text-gray-400 hover:text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label for="room-name" class="block text-sm font-medium mb-1">Room Name</label>
+                    <input type="text" id="room-name" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label for="room-description" class="block text-sm font-medium mb-1">Description (Optional)</label>
+                    <textarea id="room-description" rows="2" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+                <div class="flex justify-end">
+                    <button id="create-room-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New DM Modal -->
+    <div id="new-dm-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">New Message</h2>
+                <button id="close-dm-modal" class="text-gray-400 hover:text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label for="search-user" class="block text-sm font-medium mb-1">Search Users</label>
+                    <input type="text" id="search-user" placeholder="Username" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div id="search-results" class="max-h-60 overflow-y-auto space-y-2">
+                    <!-- Search results will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // App state
+        const state = {
+            currentUser: null,
+            currentChat: null,
+            socket: null,
+            users: {},
+            rooms: {},
+            chats: {},
+            typingUsers: {},
+            connectionStatus: 'disconnected',
+            fileToUpload: null
+        };
+
+        // DOM elements
+        const elements = {
+            authSection: document.getElementById('auth-section'),
+            chatInterface: document.getElementById('chat-interface'),
+            loginForm: document.getElementById('login-form'),
+            registerBtn: document.getElementById('register-btn'),
+            loginBtn: document.getElementById('login-btn'),
+            usernameInput: document.getElementById('username'),
+            passwordInput: document.getElementById('password'),
+            logoutBtn: document.getElementById('logout-btn'),
+            menuBtn: document.getElementById('menu-btn'),
+            sidebar: document.getElementById('sidebar'),
+            messages: document.getElementById('messages'),
+            messageInput: document.getElementById('message-input'),
+            sendBtn: document.getElementById('send-btn'),
+            chatTitle: document.getElementById('chat-title'),
+            chatAvatar: document.getElementById('chat-avatar'),
+            typingIndicator: document.getElementById('typing-indicator'),
+            presenceInfo: document.getElementById('presence-info'),
+            connectionStatus: document.getElementById('connection-status'),
+            roomsList: document.getElementById('rooms-list'),
+            dmList: document.getElementById('dm-list'),
+            userAvatar: document.getElementById('user-avatar'),
+            userName: document.getElementById('user-name'),
+            userStatus: document.getElementById('user-status'),
+            createRoomModal: document.getElementById('create-room-modal'),
+            closeRoomModal: document.getElementById('close-room-modal'),
+            roomNameInput: document.getElementById('room-name'),
+            roomDescriptionInput: document.getElementById('room-description'),
+            createRoomBtn: document.getElementById('create-room-btn'),
+            modalBackdrop: document.getElementById('modal-backdrop'),
+            newDmBtn: document.getElementById('new-dm-btn'),
+            newDmModal: document.getElementById('new-dm-modal'),
+            closeDmModal: document.getElementById('close-dm-modal'),
+            searchUserInput: document.getElementById('search-user'),
+            searchResults: document.getElementById('search-results'),
+            attachBtn: document.getElementById('attach-btn'),
+            fileInput: document.getElementById('file-input'),
+            uploadPreview: document.getElementById('upload-preview'),
+            cancelUpload: document.getElementById('cancel-upload'),
+            chatInfoBtn: document.getElementById('chat-info-btn')
+        };
+
+        // Event listeners
+        function setupEventListeners() {
+            // Authentication
+            elements.loginBtn.addEventListener('click', handleLogin);
+            elements.registerBtn.addEventListener('click', handleRegister);
+            elements.logoutBtn.addEventListener('click', handleLogout);
+
+            // Chat functionality
+            elements.messageInput.addEventListener('keydown', handleMessageKeyDown);
+            elements.messageInput.addEventListener('input', handleTyping);
+            elements.sendBtn.addEventListener('click', sendMessage);
+            elements.attachBtn.addEventListener('click', () => elements.fileInput.click());
+            elements.fileInput.addEventListener('change', handleFileSelect);
+            elements.cancelUpload.addEventListener('click', cancelFileUpload);
+
+            // UI interactions
+            elements.menuBtn.addEventListener('click', toggleSidebar);
+            elements.createRoomBtn.addEventListener('click', createRoom);
+            elements.closeRoomModal.addEventListener('click', closeRoomModal);
+            elements.newDmBtn.addEventListener('click', openNewDmModal);
+            elements.closeDmModal.addEventListener('click', closeNewDmModal);
+            elements.searchUserInput.addEventListener('input', searchUsers);
+
+            // Modal backdrop closes modals
+            elements.modalBackdrop.addEventListener('click', () => {
+                closeRoomModal();
+                closeNewDmModal();
+            });
+
+            // Initialize WebSocket connection
+            connectWebSocket();
+        }
+
+        // WebSocket functions
+        function connectWebSocket() {
+            // In a real app, you would connect to your WebSocket server URL
+            const wsUrl = 'wss://your-websocket-server.com/chat';
+            state.socket = new WebSocket(wsUrl);
+
+            state.socket.onopen = () => {
+                updateConnectionStatus('connected');
+                console.log('WebSocket connected');
+                if (state.currentUser) {
+                    // Re-authenticate if user was already logged in
+                    authenticateWebSocket();
+                }
+            };
+
+            state.socket.onclose = () => {
+                updateConnectionStatus('disconnected');
+                console.log('WebSocket disconnected');
+                // Try to reconnect after 5 seconds
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            state.socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            state.socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+        }
+
+        function authenticateWebSocket() {
+            if (state.socket && state.socket.readyState === WebSocket.OPEN && state.currentUser) {
+                const authMessage = {
+                    type: 'authenticate',
+                    token: localStorage.getItem('chatToken') // Using JWT in a real app
+                };
+                state.socket.send(JSON.stringify(authMessage));
+            }
+        }
+
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'authentication':
+                    if (data.success) {
+                        console.log('WebSocket authenticated successfully');
+                        loadInitialData();
+                    }
+                    break;
+                case 'user_list':
+                    updateUserList(data.users);
+                    break;
+                case 'room_list':
+                    updateRoomList(data.rooms);
+                    break;
+                case 'message':
+                    handleNewMessage(data.message, data.chatId);
+                    break;
+                case 'message_history':
+                    displayMessageHistory(data.messages, data.chatId);
+                    break;
+                case 'user_joined':
+                    handleUserJoined(data.user);
+                    break;
+                case 'user_left':
+                    handleUserLeft(data.userId);
+                    break;
+                case 'typing':
+                    handleTypingIndicator(data.userId, data.chatId, data.isTyping);
+                    break;
+                case 'presence_update':
+                    handlePresenceUpdate(data.userId, data.status);
+                    break;
+                case 'new_room':
+                    handleNewRoom(data.room);
+                    break;
+                case 'new_dm':
+                    handleNewDm(data.chat);
+                    break;
+                default:
+                    console.log('Unhandled message type:', data.type);
+            }
+        }
+
+        // Authentication handlers
+        function handleLogin() {
+            const username = elements.usernameInput.value.trim();
+            const password = elements.passwordInput.value;
+
+            if (!username || !password) {
+                alert('Please enter both username and password');
+                return;
+            }
+
+            // In a real app, you would send this to your authentication server
+            console.log(`Logging in as ${username}`);
+            
+            // Simulate successful login
+            setTimeout(() => {
+                state.currentUser = {
+                    id: 'user_' + Date.now(),
+                    username: username,
+                    status: 'online',
+                    avatar: ''
+                };
+                
+                // Store in local storage (in a real app, you'd use JWT)
+                localStorage.setItem('chatToken', 'simulated-token');
+                localStorage.setItem('currentUser', JSON.stringify(state.currentUser));
+                
+                setupUIAfterLogin();
+                authenticateWebSocket();
+            }, 500);
+        }
+
+        function handleRegister() {
+            const username = elements.usernameInput.value.trim();
+            const password = elements.passwordInput.value;
+
+            if (!username || !password) {
+                alert('Please enter both username and password');
+                return;
+            }
+
+            // In a real app, you would validate and send to your registration endpoint
+            console.log(`Registering new user ${username}`);
+
+            // Simulate successful registration followed by login
+            setTimeout(() => {
+                alert(`Account created for ${username}. You can now log in.`);
+                elements.usernameInput.value = username;
+                elements.passwordInput.value = '';
+            }, 500);
+        }
+
+        function handleLogout() {
+            // Clear local storage
+            localStorage.removeItem('chatToken');
+            localStorage.removeItem('currentUser');
+            
+            // Close WebSocket connection
+            if (state.socket) {
+                state.socket.close();
+            }
+            
+            // Reset state
+            state.currentUser = null;
+            state.currentChat = null;
+            state.users = {};
+            state.rooms = {};
+            state.chats = {};
+            
+            // Reset UI
+            elements.authSection.classList.remove('hidden');
+            elements.chatInterface.classList.add('hidden');
+            elements.usernameInput.value = '';
+            elements.passwordInput.value = '';
+        }
+
+        function setupUIAfterLogin() {
+            // Update user info in sidebar
+            elements.userName.textContent = state.currentUser.username;
+            elements.userStatus.textContent = 'Online';
+            
+            // Show chat interface
+            elements.authSection.classList.add('hidden');
+            elements.chatInterface.classList.remove('hidden');
+            
+            // Load initial data (in a real app, this would come from the server)
+            loadInitialData();
+        }
+
+        // Data loading
+        function loadInitialData() {
+            // Simulate loading of initial data from server
+            if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'get_initial_data'
+                };
+                state.socket.send(JSON.stringify(message));
+            } else {
+                // Mock data for demonstration
+                setTimeout(() => {
+                    updateUserList([
+                        { id: 'user2', username: 'jane_doe', status: 'online', avatar: '' },
+                        { id: 'user3', username: 'bob_smith', status: 'away', avatar: '' }
+                    ]);
+                    
+                    updateRoomList([
+                        { id: 'general', name: 'General', description: 'Main chat room' },
+                        { id: 'random', name: 'Random', description: 'Off-topic discussions' }
+                    ]);
+                    
+                    // Create mock DM chats
+                    const dmChats = [
+                        {
+                            id: 'dm_user2',
+                            type: 'dm',
+                            participants: [state.currentUser.id, 'user2'],
+                            otherUser: 'user2',
+                            lastMessage: { sender: 'user2', text: 'Hey there!', timestamp: Date.now() - 3600000 }
+                        },
+                        {
+                            id: 'dm_user3',
+                            type: 'dm',
+                            participants: [state.currentUser.id, 'user3'],
+                            otherUser: 'user3',
+                            lastMessage: { sender: state.currentUser.id, text: 'See you tomorrow!', timestamp: Date.now() - 86400000 }
+                        }
+                    ];
+                    
+                    dmChats.forEach(dm => {
+                        state.chats[dm.id] = dm;
+                    });
+                    
+                    updateDmList();
+                }, 500);
+            }
+        }
+
+        function updateUserList(users) {
+            state.users = {}};
+            users.forEach(user => 
+                state)
+                
